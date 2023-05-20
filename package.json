@@ -13,7 +13,7 @@
   "devDependencies": {},
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
-    "bot": "nodemon index.js"
+    "bot": "nodemon ./src/index.js"
   },
   "author": "",
   "license": "ISC"

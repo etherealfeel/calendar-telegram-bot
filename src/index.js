@@ -8,7 +8,7 @@ const bot = new TelegramBot(botToken, { polling: true });
 
 // Provide the required configuration
 const CREDENTIALS = JSON.parse(process.env.CREDENTIALS);
-const credentialsJSON = require('./credentials.json');
+const credentialsJSON = require('../credentials.json');
 const calendarId = process.env.CALENDAR_ID;
 
 // Google calendar API settings
@@ -82,6 +82,27 @@ bot.onText(/\/add/, (msg) => {
   });
 });
 
+bot.onText(/\/delete (.+)/, (msg, match) => {
+  const chatId = msg.chat.id;
+  const eventId = match[1]; // The ID of the event to delete
+
+  deleteEvent(eventId)
+    .then(() => {
+      bot.sendMessage(chatId, 'Event deleted successfully!');
+    })
+    .catch((err) => {
+      console.error('Error deleting event:', err);
+      bot.sendMessage(chatId, 'Error deleting event. Please try again later.');
+    });
+});
+
+async function deleteEvent(eventId) {
+  return calendar.events.delete({
+    calendarId: calendarId,
+    eventId: eventId,
+  });
+}
+
 bot.onText(/\/events/, async (msg) => {
   const chatId = msg.chat.id;
 
@@ -95,10 +116,11 @@ bot.onText(/\/events/, async (msg) => {
     });
 
     const events = response.data.items;
-    let message = 'Upcoming events:\n';
+    console.log(events)
+    let message = '📎 Upcoming events: 📎\n';
     events.forEach((event) => {
       const start = event.start.dateTime || event.start.date;
-      message += `${start} - ${event.summary}\n`;
+      message += `${start} - ${event.summary}\nID: ${event.id}\n`;
     });
 
     bot.sendMessage(chatId, message);
