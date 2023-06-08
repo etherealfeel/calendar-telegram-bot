@@ -1,35 +1,100 @@
 const { google } = require('googleapis');
 const TelegramBot = require('node-telegram-bot-api');
 const botToken = '6200492149:AAGtCvaqUGiXQA2USvS4OHUDutulQL0jz6o';
-require('dotenv').config();
+const { OAuth2Client } = require('google-auth-library');
+const request = require('request');
 
-//Create telegram bot
-const bot = new TelegramBot(botToken, { polling: true });
+const formatDate = require('./utils');
 
-// Provide the required configuration
-const CREDENTIALS = JSON.parse(process.env.CREDENTIALS);
-const credentialsJSON = require('../credentials.json');
-const calendarId = process.env.CALENDAR_ID;
+const tokenEndpoint = 'https://oauth2.googleapis.com/token';
+const clientId =
+  '961480583544-rcureqc6gcjo62kbg4r3glvhne2rlspq.apps.googleusercontent.com';
+const clientSecret = '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';
+const redirectUri = 'http://localhost:4000/oauth/callback';
+let authorizationCode = '';
 
-// Google calendar API settings
-const SCOPES = 'https://www.googleapis.com/auth/calendar';
-// const calendar = google.calendar({ version: 'v3', auth: CREDENTIALS });
+const express = require('express');
+const app = express();
 
-const jwtClient = new google.auth.JWT(
-  CREDENTIALS.client_email,
-  null,
-  CREDENTIALS.private_key,
-  SCOPES
-);
+app.get('/oauth/callback', (req, res) => {
+  authorizationCode = req.query.code;
 
-const calendar = google.calendar({
-  version: "v3",
-  auth: jwtClient,
+  res.send('Authorization code received: ' + authorizationCode);
 });
 
-const auth = new google.auth.GoogleAuth({
-  keyFile: "./credentials.json",
-  scopes: SCOPES,
+app.listen(4000, () => {
+  console.log('Server started on port 4000');
+});
+
+const bot = new TelegramBot(botToken, { polling: true });
+
+
+let client = new OAuth2Client({
+  clientId:
+    '961480583544-rcureqc6gcjo62kbg4r3glvhne2rlspq.apps.googleusercontent.com',
+  clientSecret: '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',
+  redirectUri: 'http://localhost:4000/oauth/callback',
+});
+let calendar = google.calendar({ version: 'v3', auth: client });
+
+function getAuthUrl() {
+  const authUrl = client.generateAuthUrl({
+    access_type: 'offline',
+    scope: 'https://www.googleapis.com/auth/calendar',
+  });
+  return authUrl;
+}
+
+bot.onText(/\/start/, (msg) => {
+  const chatId = msg.chat.id;
+  const authUrl = getAuthUrl();
+
+  bot.sendMessage(
+    chatId,
+    `Please authorize the bot by visiting the following link:\n${authUrl}\nAfter this step type /auth`,
+  );
+});
+
+bot.onText(/\/auth/, (msg) => {
+  const chatId = msg.chat.id;
+  request.post(
+    {
+      url: tokenEndpoint,
+      form: {
+        grant_type: 'authorization_code',
+        client_id: clientId,
+        client_secret: clientSecret,
+        redirect_uri: redirectUri,
+        code: authorizationCode,
+      },
+    },
+    (error, response, body) => {
+      if (error) {
+        console.error(
+          'Error exchanging authorization code for access token:',
+          error,
+        );
+        return;
+      }
+
+      if (response.statusCode === 200) {
+        const tokenData = JSON.parse(body);
+        const accessToken = tokenData.access_token;
+        const refreshToken = tokenData.refresh_token;
+        console.log('access token:', accessToken);
+        console.log('refresh token:', refreshToken);
+        client.setCredentials({
+          access_token: accessToken,
+          refresh_token: refreshToken,
+        });
+        calendar = google.calendar({ version: 'v3', auth: client });
+        bot.sendMessage(
+          chatId,
+          'Success 💚 You are now authorized to access all features.',
+        );
+      }
+    },
+  );
 });
 
 async function createEvent(title, dateTime) {
@@ -46,8 +111,7 @@ async function createEvent(title, dateTime) {
   };
 
   return calendar.events.insert({
-    calendarId: calendarId,
-    auth: jwtClient,
+    calendarId: 'primary',
     resource: event,
   });
 }
@@ -63,7 +127,10 @@ bot.onText(/\/add/, (msg) => {
     if (titleMsg.chat.id === chatId) {
       eventTitle = titleMatch[1];
 
-      bot.sendMessage(chatId, 'Please enter the event date and time (YYYY-MM-DD HH:mm):');
+      bot.sendMessage(
+        chatId,
+        'Please enter the event date and time (YYYY-MM-DD HH:mm):',
+      );
       bot.onText(/(.+)/, (dateMsg, dateMatch) => {
         if (dateMsg.chat.id === chatId) {
           eventDateTime = new Date(dateMatch[1]);
@@ -73,8 +140,10 @@ bot.onText(/\/add/, (msg) => {
               bot.sendMessage(chatId, 'Event created successfully!');
             })
             .catch((err) => {
-              console.error('Error creating event:', err);
-              bot.sendMessage(chatId, 'Error creating event. Please try again later.');
+              bot.sendMessage(
+                chatId,
+                'Error creating event. Please try again later.',
+              );
             });
         }
       });
@@ -98,7 +167,7 @@ bot.onText(/\/delete (.+)/, (msg, match) => {
 
 async function deleteEvent(eventId) {
   return calendar.events.delete({
-    calendarId: calendarId,
+    calendarId: 'primary',
     eventId: eventId,
   });
 }
@@ -108,7 +177,7 @@ bot.onText(/\/events/, async (msg) => {
 
   try {
     const response = await calendar.events.list({
-      calendarId: process.env.CALENDAR_ID,
+      calendarId: 'primary',
       timeMin: new Date().toISOString(),
       maxResults: 10,
       singleEvents: true,
@@ -116,11 +185,14 @@ bot.onText(/\/events/, async (msg) => {
     });
 
     const events = response.data.items;
-    console.log(events)
-    let message = '📎 Upcoming events: 📎\n';
-    events.forEach((event) => {
+    console.log(events);
+    let message = '📌 Upcoming events 📌\n';
+    events.forEach((event, i) => {
       const start = event.start.dateTime || event.start.date;
-      message += `${start} - ${event.summary}\nID: ${event.id}\n`;
+      const end = event.end.dateTime || event.end.date;
+      message += `${i + 1}. ${event.summary} 🕔 ${formatDate(
+        start,
+      )} - ${formatDate(end, true)}\n🆔: ${event.id}\n`;
     });
 
     bot.sendMessage(chatId, message);
@@ -128,5 +200,4 @@ bot.onText(/\/events/, async (msg) => {
     console.error('Error retrieving events:', err);
     bot.sendMessage(chatId, 'Error retrieving events. Please try again later.');
   }
-
 });

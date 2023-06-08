@@ -6,14 +6,19 @@
   "dependencies": {
     "@google-cloud/local-auth": "^2.1.0",
     "dotenv": "^16.0.3",
+    "express": "^4.18.2",
     "google-auth-library": "^8.8.0",
     "googleapis": "^105.0.0",
-    "node-telegram-bot-api": "^0.61.0"
+    "node-telegram-bot-api": "^0.61.0",
+    "passport": "^0.6.0",
+    "passport-google-oauth20": "^2.0.0",
+    "request": "^2.88.2"
   },
   "devDependencies": {},
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
-    "bot": "nodemon ./src/index.js"
+    "bot": "nodemon ./src/index.js",
+    "server": "nodemon ./src/server.js"
   },
   "author": "",
   "license": "ISC"
