@@ -8,16 +8,20 @@ const schedule = require('node-schedule');
 const formatDate = require('./utils');
 const express = require('express');
 const app = express();
-
+const axios = require('axios');
 const tokenEndpoint = process.env.TOKEN_ENDPOINT;
 const clientId = process.env.CLIENT_ID;
 const clientSecret = process.env.CLIENT_SECRET;
 const redirectUri = process.env.REDIRECT_URI;
+const calendarRouter = require('./db/routes/calendar.routes');
 
 app.get('/oauth/callback', (req, res) => {
   authorizationCode = req.query.code;
   res.send('Код авторизації отримано(Authorization code received)!');
 });
+
+app.use(express.json());
+app.use('/calendar', calendarRouter);
 
 app.listen(4000, () => {
   console.log('Server started on port 4000');
@@ -91,6 +95,45 @@ bot.onText(/\/auth/, (msg) => {
       }
     },
   );
+  axios
+    .get('http://localhost:4000/calendar/timer')
+    .then((response) => {
+      const timerMinutes = response.data;
+      bot.sendMessage(
+        chatId,
+        `\nВи отримуєте оповіщення про події за ${timerMinutes} хвилин до них. \nНалаштування таймера - /updatereminder minutes`,
+      );
+    })
+    .catch((error) => {
+      console.error('Error:', error);
+    });
+});
+
+bot.onText(/\/updatereminder (.+)/, (msg, match) => {
+  const chatId = msg.chat.id;
+  const timerMinutes = match[1];
+  if (timerMinutes > 1440) {
+    bot.sendMessage(chatId, 'Максимально дозволений таймер - 24 години.');
+    return;
+  }
+
+  const data = {
+    timer: timerMinutes,
+    descr: 'timerUpdatedViaBot',
+  };
+
+  axios
+    .put('http://localhost:4000/calendar/timer', data)
+    .then((response) => {
+      bot.sendMessage(
+        chatId,
+        `Оновлений таймер для оповіщень: ${data.timer} хвилин ✅`,
+      );
+    })
+    .catch((error) => {
+      bot.sendMessage(chatId, messages.MSG_UPDATETIMER_SUCC);
+      console.error('Error:', error);
+    });
 });
 
 const createEvent = async (title, startDateTime, endDateTime) => {
@@ -169,16 +212,25 @@ bot.onText(/\/events/, async (msg) => {
       )} - ${formatDate(end)}\n🆔: ${event.id}\n`;
 
       const eventTime = new Date(event.start.dateTime);
-      const notificationTime = new Date(eventTime.getTime() - 10 * 60000);
+      axios
+        .get('http://localhost:4000/calendar/timer')
+        .then((response) => {
+          const timerMinutes = response.data;
+          const notificationTime = new Date(
+            eventTime.getTime() - timerMinutes * 60000,
+          );
 
-      schedule.scheduleJob(notificationTime, function () {
-        const notificationMessage = `Нагадування: подія "${event.summary}" почнеться за 10 хвилин❕`;
-        sendNotification(chatId, notificationMessage);
-      });
+          schedule.scheduleJob(notificationTime, function () {
+            const notificationMessage = `Нагадування: подія "${event.summary}" почнеться за ${timerMinutes} хвилин❕`;
+            sendNotification(chatId, notificationMessage);
+          });
+        })
+        .catch((error) => {
+          console.error('Error:', error);
+        });
     });
 
     bot.sendMessage(chatId, message);
-    bot.sendMessage(chatId, messages.MSG_SUB_SUCC);
   } catch (err) {
     console.error('Error retrieving events:', err);
     bot.sendMessage(chatId, messages.MSG_EVENTS_ERR);
@@ -206,7 +258,7 @@ bot.onText(/\/deleteall/, async (msg) => {
       deleteEvent(event.id);
     });
 
-    bot.sendMessage(chatId, messages.MSG_DELETE_SUCC);
+    bot.sendMessage(chatId, messages.MSG_DELETEALL_SUCC);
   } catch (err) {
     console.error('Error retrieving events:', err);
     bot.sendMessage(chatId, messages.MSG_DELETE_ERR);
